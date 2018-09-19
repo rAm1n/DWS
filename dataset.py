@@ -14,7 +14,7 @@ from torchvision import transforms, utils
 
 import numpy as np
 from scipy.spatial import distance
-from scipy.ndimage.filters import gaussian_filter
+from scipy.ndimage import gaussian_filter as g
 from PIL import Image, ImageFilter
 import skimage.transform
 
@@ -44,7 +44,6 @@ sal_transform = transforms.Compose([
 
 
 sal_gt_transform = transforms.Compose([
-		# transforms.Resize((76,100)),
 		transforms.Resize((75,100)),
 		transforms.ToTensor(),
 	])
@@ -246,7 +245,7 @@ class SequnceDataset(Dataset):
 class Saliency(Dataset):
 	"""Face Landmarks dataset."""
 
-	def __init__(self, config, mode='train', transform=sal_transform, sal_transform=sal_gt_transform):
+	def __init__(self):
 		"""
 		Args:
 			csv_file (string): Path to the csv file with annotations.
@@ -254,37 +253,86 @@ class Saliency(Dataset):
 			transform (callable, optional): Optional transform to be applied
 				on a sample.
 		"""
-		self.config = config
-		self.transform = transform
-		self.sal_transform = sal_transform
-		self.dataset = self.load(mode)
+		# self.transform = transform
+		# self.ht_transform = ht_transform
+		self.d = SaliencyDataset()
+
+		self.name = ''
+		self.mode = ''
+
+
 
 
 	def __len__(self):
 		return len(self.dataset)
 
 	def __repr__(self):
-		return 'Dataset object - {0}'.format(self.config['name'])
+		return 'Dataset object - {0} - {1}'.format(self.name, self.mode)
 
 	def __str__(self):
-		return 'Dataset object - {0}'.format(self.config['name'])
+		return 'Dataset object - {0} - {1}'.format(self.name, self.mode)
 
 
-	def load(self, mode):
+	def load(self, name, mode='train', split={'train': 0.75, 'eval': 0.25},
+			 	resize_factor=8, duration=False, sigma=15):
 		try:
+
 			dataset = list()
+			self.d.load(name)
+			self.name, self.mode, self.duration, self.sigma = name, mode, duration,sigma
 
-			d = SaliencyDataset(self.config['dataset']['name'])
-			maps = d.get('heatmap_path')[ self.config['dataset']['saliency_' + mode]]
-			imgs = d.get('stimuli_path')[ self.config['dataset']['saliency_' + mode]]
-			seqs = d.get('sequence')[:,8]
 
-			for idx , img in enumerate(imgs):
+			if name == 'CAT2000':
+				index = list()
+				for cat in range(20):
+					base = 100 * cat
+					if mode == 'train':
+						index.extend((base + np.arange(int(100 * split['train']))))
+					elif mode == 'eval':
+						index.extend((base + np.arange(int(100 * split['train']), 100)))
+
+			else:
+				border = int(split['train'] * len(self.d))
+				if mode == 'train':
+					index =  range(border)
+				elif mode == 'eval':
+					index = range(border, len(self.d))
+
+
+
+			maps = self.d.get('heatmap_path', index=index)
+			imgs = self.d.get('stimuli_path', index=index)
+			# fixs = d.get('fixation', index=index)
+			# seqs = d.get('sequence', index=index)
+
+			for img_idx , img in enumerate(imgs):
 				# for seq in seqs[idx]:
-					dataset.append((img,maps[idx]))
+					dataset.append((img,maps[img_idx], index[img_idx]))
 					# dataset.append((img,maps[idx], seq))
 
-			return sorted(dataset, key=lambda k: random.random())
+			self.index = index
+			self.dataset = dataset
+			# self.dataset = sorted(dataset, key=lambda k: random.random())
+
+
+			# target_size = tuple((np.array(self.d.data[0]['img_size']) / 8).astype(np.int32))
+			target_size = ((75, 100))
+
+			self.transform = transforms.Compose([
+					transforms.ToTensor(),
+					normalize,
+				])
+
+			self.ht_transform = transforms.Compose([
+					transforms.ToTensor(),
+				])
+
+			self.target_transform = transforms.Compose([
+					transforms.Resize(target_size),
+					transforms.ToTensor(),
+				])
+
+
 
 		except OSError as e:
 				raise e
@@ -292,42 +340,36 @@ class Saliency(Dataset):
 
 	def __getitem__(self, idx):
 		# img, sal, seq = self.dataset[idx]
-		img, sal = self.dataset[idx]
+		img, sal, fix = self.dataset[idx]
 
 		# bluring input
-		img = Image.open(img)
-		if self.config['dataset']['first_blur_sigma']:
-			blurred = img.filter(ImageFilter.GaussianBlur(self.config['dataset']['first_blur_sigma']))
-		sal = Image.open(sal)
+		img = Image.open(img).convert('RGB').resize((800, 600))
+		if self.duration:
+			sal = self.d.get('fixation_dw', index=[fix], modify='remove')[0]
+			sal = g(sal, sigma=self.sigma)
+			sal = sal / sal.max()
+			sal *= 255
+			sal = Image.fromarray(sal.astype(np.uint8))#.resize((800,600))
+		else:
+			# sal = Image.open(sal)#.resize((800,600))
+			sal = self.d.get('fixation', index=[fix], modify='remove')[0]
+			sal = g(sal, sigma=self.sigma)
+			sal = sal / sal.max()
+			sal *= 255
+			sal = Image.fromarray(sal.astype(np.uint8))#.resize((800,600))
 
-
-		# w, h = img.size
-
-		# sal = np.array(sal)
-		# mask , gt = fov_mask((h,w), radius=self.config['dataset']['foveation_radius'],
-												 	# center=seq, th=self.config['dataset']['mask_th'])
-
-		# gt = Image.fromarray((gt * 255).astype(np.uint8))
-		# x  = np.zeros((h,w), dtype=np.uint8)
-		# x[:,:] = 1
-		# x[mask] = sal[mask]
-		# sal = Image.fromarray(x)
-		# gt /= gt.max()
-		# gt *= 255
-		# sal = Image.fromarray(gt.astype(np.uint8))
-
-		# blurred = np.array(blurred)
-		# blurred[mask] = np.array(img)[mask]
-		# img = Image.fromarray(blurred)
-
+		# fix = self.d.get('fixation', size=(600,800), index=[fix])[0]
+		fix = self.d.get('fixation', index=[fix], modify='remove')[0]
 
 		if self.transform:
 			img = self.transform(img)
-		if self.sal_transform:
-			sal = self.sal_transform(sal)
+		if self.target_transform:
+			target = self.target_transform(sal)
+		if self.ht_transform:
+			sal = self.ht_transform(sal)
 			# mask = self.sal_transform(gt)
 
-		return [img, sal]
+		return [img, target, sal, fix]
 		# return [img, sal, mask]
 
 
@@ -373,6 +415,8 @@ class Duration(Dataset):
 				# for seq in seqs[idx]:
 					dataset.append((img,maps[idx]))
 					# dataset.append((img,maps[idx], seq))
+
+
 
 			return sorted(dataset, key=lambda k: random.random())
 

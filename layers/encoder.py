@@ -7,9 +7,6 @@ import math
 import torch
 
 
-torch.manual_seed(999)
-
-
 
 e_config = {
 	'VGG16':{
@@ -57,7 +54,7 @@ class Encoder(nn.Module):
 		self.features = features
 		self.classifier = nn.Conv2d(512,1, kernel_size=1)
 		# self.classifier_fov = nn.Conv2d(512,1, kernel_size=1)
-		# self.sigmoid = nn.Sigmoid()
+		self.sigmoid = nn.Sigmoid()
 
 	def forward(self, x, layers=range(5)):
 
@@ -73,7 +70,11 @@ class Encoder(nn.Module):
 
 		# return [feat, self.sigmoid(sal)]#, self.sigmoid(fov)]
 		# return [feat, feat]
-		return sal
+		#b, c, w, h = sal.size()
+		#return self.sigmoid(sal.view(b,-1)).view(b,c,w,h)
+
+		return self.sigmoid(sal)
+		#return sal
 
 	def _initialize_weights(self):
 		for m in self.modules():

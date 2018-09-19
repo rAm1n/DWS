@@ -53,8 +53,7 @@ parser.add_argument('--arch', '-a', metavar='ARCH', default='dvgg16',
 						' (default: dvgg16)')
 
 parser.add_argument('--name', '-n', metavar='NAME', default='TS-GTS',
-					choices=['TS-GTS', 'TDW-GTS', 'TS-GTDW', 'TDW-GTDW',
-								'TS', 'TDW'],
+					choices=['TS-GTS', 'TDW-GTS', 'TS-GTDW', 'TDW-GTDW'],
 					help='train policy (default: TS-GTS)')
 
 parser.add_argument('--log', default='logs/', metavar='DIR',
@@ -91,7 +90,11 @@ parser.add_argument('--pretrained', dest='pretrained', action='store_true',
 
 best_prec1 = 0
 
-RESULTS = np.zeros((2, 20, 5, 2000, 5))  # train/eval | epoch | dataset | images | metric.
+# RESULTS = np.zeros(( 4, 3, 5, 2000, 5))  # train/eval | epoch | dataset | images | metric.
+# RESULTS[RESULTS==0] = np.nan
+
+RESULTS = np.zeros(( 2, 2, 16, 16, 5, 2000, 5))
+# train policy | eval policy | sigma | epoch |  dataset | images | metric.
 RESULTS[RESULTS==0] = np.nan
 
 SHUF_MAPS = np.load('shuf_maps.npz').tolist()
@@ -107,148 +110,191 @@ def main():
 	logging.basicConfig(
 		format="%(message)s",
 		handlers=[
-			# logging.FileHandler("{0}/{1}.log".format(args.log, sys.argv[0].replace('.py','') + datetime.now().strftime('_%H_%M_%d_%m_%Y'))),
-			logging.FileHandler("{0}/{1}.log".format(args.log, sys.argv[0].replace('.py','') + args.name)),
+			logging.FileHandler("{0}/{1}.log".format(args.log, sys.argv[0].replace('.py','') + datetime.now().strftime('_%H_%M_%d_%m_%Y'))),
 			logging.StreamHandler()
 		],
 		level=logging.INFO)
 
-	for sigma in range(6,16,2):
-		# create model
-		if args.pretrained:
-			pass
-			# logging.info("=> using pre-trained model '{}'".format(args.arch))
-			# model = models.__dict__[args.arch](pretrained=True)
+	# create model
+	if args.pretrained:
+		pass
+		# logging.info("=> using pre-trained model '{}'".format(args.arch))
+		# model = models.__dict__[args.arch](pretrained=True)
+	else:
+		model_name = CONFIG['model']['name']
+		en_name = model_name.split('_')[0]
+		logging.info("=> creating model '{}'".format(en_name))
+		model = make_encoder(en_name)
+		model._initialize_weights()
+		# model.load_imagenet_weights()
+		# CONFIG['train']['user'] = [8]
+		# model = Encoder(CONFIG)
+		# model._initialize_weights()
+		# model.encoder.load_weights()
+
+
+
+	model.cuda()
+
+	# define loss function (criterion) and optimizer
+	#criterion = nn.BCEWithLogitsLoss().cuda()
+	criterion = nn.BCELoss().cuda()
+
+	# optimizer = torch.optim.SGD(
+	# 				list(model.encoder[1].parameters()) +
+	# 				list(model.readout.parameters()),
+	# 				# model.parameters(),
+	# 				args.lr,
+	# 				momentum=args.momentum,
+	# 				weight_decay=args.weight_decay)
+
+	# for param in model.encoder[0].parameters():
+	# 	param.requires_grad = False
+
+
+	optimizer = torch.optim.Adam(
+					# list(model.encoder[1].parameters()) +
+					# list(model.readout.parameters()),
+					model.parameters(),
+					args.lr,
+					betas=(0.9, 0.999), eps=1e-08, weight_decay=args.weight_decay)
+
+
+
+	# optionally resume from a checkpoint
+	cudnn.benchmark = True
+
+
+	if args.resume:
+		if os.path.isfile(args.resume):
+			logging.info("=> loading checkpoint '{}'".format(args.resume))
+			checkpoint = torch.load(args.resume)
+			args.start_epoch = checkpoint['epoch']
+			best_prec1 = checkpoint['best_prec1']
+			model.load_state_dict(checkpoint['state_dict'])
+			optimizer.load_state_dict(checkpoint['optimizer'])
+			logging.info("=> loaded checkpoint '{}' (epoch {})"
+				  .format(args.resume, checkpoint['epoch']))
 		else:
-			model_name = CONFIG['model']['name']
-			en_name = model_name.split('_')[0]
-			logging.info("=> creating model '{}'".format(en_name))
-			model = make_encoder(en_name)
-			model._initialize_weights()
-			# model.load_imagenet_weights()
-			# CONFIG['train']['user'] = [8]
-			# model = Encoder(CONFIG)
-			# model._initialize_weights()
-			# model.encoder.load_weights()
+			logging.info("=> no checkpoint found at '{}'".format(args.resume))
 
 
+	# train_duration = True if (args.name.split('-')[0] == 'TDW') else False
+	# eval_duration = True if (args.name.split('-')[1] == 'GTDW') else False
 
-		model.cuda()
+	# print(args.name, train_duration, eval_duration)
 
-		# define loss function (criterion) and optimizer
-		#criterion = nn.BCEWithLogitsLoss().cuda()
-		criterion = nn.BCELoss().cuda()
-
-		# optimizer = torch.optim.SGD(
-		# 				list(model.encoder[1].parameters()) +
-		# 				list(model.readout.parameters()),
-		# 				# model.parameters(),
-		# 				args.lr,
-		# 				momentum=args.momentum,
-		# 				weight_decay=args.weight_decay)
-
-		# for param in model.encoder[0].parameters():
-		# 	param.requires_grad = False
+	# train_dataset = Saliency()
+	# train_dataset.load('OSIE', 'train', duration=train_duration)
+	# train_loader = torch.utils.data.DataLoader(
+	# 	train_dataset, batch_size=args.batch_size, shuffle=False,
+	# 	num_workers=args.workers, pin_memory=True, sampler=None)
 
 
-		optimizer = torch.optim.Adam(
-						# list(model.encoder[1].parameters()) +
-						# list(model.readout.parameters()),
-						model.parameters(),
-						args.lr,
-						betas=(0.9, 0.999), eps=1e-08, weight_decay=args.weight_decay)
+	# val_loaders = list()
+
+	# for name_idx, name in enumerate(CONFIG['eval']['dataset']):
+	# 	# if name == 'OSIE':
+	# 	# 	split={'train' :0.75 , 'eval' : 0.25}
+	# 	# else:
+	# 	split={'train' :0.0 , 'eval' : 1.0}
+	# 	val_ds = Saliency()
+	# 	val_ds.load(name, 'eval', split=split,
+	# 				 duration=eval_duration)
+
+	# 	val_loaders.append(
+	# 		torch.utils.data.DataLoader(
+	# 			val_ds,
+	# 			batch_size=args.batch_size * 2, shuffle=False,
+	# 			num_workers=args.workers, pin_memory=True)
+	# 	)
+
+	# if args.evaluate:
+	# 	validate(val_loaders, model, criterion)
+	# 	return
+
+	# if args.visualize:
+	# 	visualize(val_loader, model)
+	# 	return
 
 
+	# policies = [
+	# 	[
+	# 		'TS-GTS-5.pth.tar',
+	# 		'TS-GTS-10.pth.tar',
+	# 		'TS-GTS-15.pth.tar'],
+	# 	[
+	# 		'TS-GTDW-5.pth.tar',
+	# 		'TS-GTDW-10.pth.tar',
+	# 		'TS-GTDW-15.pth.tar'],
+	# 	[
+	# 		'TDW-GTS-5.pth.tar',
+	# 		'TDW-GTS-10.pth.tar',
+	# 		'TDW-GTS-15.pth.tar'],
 
-		# optionally resume from a checkpoint
-		cudnn.benchmark = True
+	# 	[
+	# 		'TDW-GTDW-5.pth.tar',
+	# 		'TDW-GTDW-10.pth.tar',
+	# 		'TDW-GTDW-15.pth.tar'],
+	# ]
+	policies = [
+		'TS-{0}-{1}.pth.tar',
+		'TDW-{0}-{1}.pth.tar',
+	]
 
+	for train_policy_idx, train_policy in enumerate(policies):
 
-		if args.resume:
-			if os.path.isfile(args.resume):
-				logging.info("=> loading checkpoint '{}'".format(args.resume))
-				checkpoint = torch.load(args.resume)
-				args.start_epoch = checkpoint['epoch']
-				best_prec1 = checkpoint['best_prec1']
-				model.load_state_dict(checkpoint['state_dict'])
-				optimizer.load_state_dict(checkpoint['optimizer'])
-				logging.info("=> loaded checkpoint '{}' (epoch {})"
-					  .format(args.resume, checkpoint['epoch']))
-			else:
-				logging.info("=> no checkpoint found at '{}'".format(args.resume))
+		for eval_policy_idx, eval_policy in enumerate(['GTS', 'GTDW']):
 
+			for sigma in range(6,15, 2):
 
-		train_duration = True if (args.name == 'TDW') else False
-		# eval_duration = True if (args.name.split('-')[1] == 'GTDW') else False
+				val_loaders = list()
+				# model_name = '-'.join(policy[0].split('-')[:2])
+				# eval_duration = True if (model_name.split('-')[1] == 'GTDW') else False
+				# print('eval_duration: {0}'.format(eval_duration))
+				# model_name = '-'.join(policy[0].split('-')[:2])
+				eval_duration = True if (eval_policy == 'GTDW') else False
 
-		print(args.name, train_duration)#, eval_duration)
+				for name_idx, name in enumerate(CONFIG['eval']['dataset']):
+					# if name == 'OSIE':
+					# 	split={'train' :0.75 , 'eval' : 0.25}
+					# else:
 
-		train_dataset = Saliency()
-		train_dataset.load('OSIE', 'train', duration=train_duration,
-		split={'train' :0.90 , 'eval' : 0.1}, sigma=sigma)
-		train_loader = torch.utils.data.DataLoader(
-			train_dataset, batch_size=args.batch_size, shuffle=False,
-			num_workers=args.workers, pin_memory=True, sampler=None)
+					split={'train' :0.0 , 'eval' : 1.0}
+					val_ds = Saliency()
+					val_ds.load(name, 'eval', split=split,
+								 duration=eval_duration, sigma=sigma)
 
+					val_loaders.append(
+						torch.utils.data.DataLoader(
+							val_ds,
+							batch_size=args.batch_size * 2, shuffle=False,
+							num_workers=args.workers, pin_memory=True)
+					)
 
-		# val_loaders = list()
+				for  epoch in ([15]):
 
-		# for name_idx, name in enumerate(CONFIG['eval']['dataset']):
-		# 	if name == 'OSIE':
-		# 		split={'train' :0.75 , 'eval' : 0.25}
-		# 	else:
-		# 		split={'train' :0.0 , 'eval' : 1.0}
-		# 	val_ds = Saliency()
-		# 	# val_ds.load(name, 'eval', split=split,
-		# 	# 			 duration=eval_duration, sigma=sigma)
-		# 	val_ds.load(name, 'eval', split=split,
-		# 				 duration=eval_duration, sigma=sigma)
+					weight = train_policy.format(epoch, sigma)
+					logging.info('eval_duration: {0} - {1}'.format(weight, eval_policy ))
 
-		# 	val_loaders.append(
-		# 		torch.utils.data.DataLoader(
-		# 			val_ds,
-		# 			batch_size=args.batch_size * 2, shuffle=False,
-		# 			num_workers=args.workers, pin_memory=True)
-		# 	)
+					try:
 
-		if args.evaluate:
-			validate(val_loaders, model, criterion)
-			return
+						weight = os.path.join(args.weights, weight)
+						# adjust_learning_rate(optimizer, epoch)
+						model = load_check_point(model, weight)
 
-		# if args.visualize:
-		# 	visualize(val_loader, model)
-		# 	return
+						prec1 = validate(val_loaders, model, criterion,
+							(train_policy_idx, eval_policy_idx,
+								sigma, epoch))
 
-		for epoch in range(args.start_epoch, args.epochs):
+						with open('results/{0}.npy'.format('TOTAL'), 'wb') as f:
+							np.save(f, np.array(RESULTS))
 
-			try:
-
-				adjust_learning_rate(optimizer, epoch)
-
-				# train for one epoch
-				train(train_loader, model, criterion, optimizer, epoch, sigma)
-
-				# evaluate on validation set
-				# prec1 = validate(val_loaders, model, criterion, epoch)
-
-				# remember best prec@1 and save checkpoint
-			#	is_best = prec1 > best_prec1
-				# best_prec1 = max(prec1, best_prec1)
-				#best_prec1 = 1
-				if epoch in [4, 9, 14]:
-					save_checkpoint({
-						'epoch': epoch + 1,
-						'arch': args.arch,
-						'state_dict': model.state_dict(),
-						'best_prec1': True,
-						'optimizer' : optimizer.state_dict(),
-					}, True, sigma)
-
-			except Exception as x:
-				print(x)
+					except Exception as x:
+						print(x)
 
 
-def train(train_loader, model, criterion, optimizer, epoch, sigma):
+def train(train_loader, model, criterion, optimizer, epoch):
 	global output, target, input
 	batch_time = AverageMeter()
 	data_time = AverageMeter()
@@ -311,10 +357,10 @@ def train(train_loader, model, criterion, optimizer, epoch, sigma):
 		end = time.time()
 
 		if batch_idx % args.print_freq == 0:
-			msg = '[{0} - {1}][{2}/{3}]\t' \
+			msg = '[{0}/{1}]\t' \
 			'Time {batch_time_val:.3f} ({batch_time_avg:.3f})\t' \
 			'Loss {loss_val:.4f} ({loss_avg:.4f})\n'.format(
-				epoch, sigma, train_loader.dataset.name, len(train_loader),
+				train_loader.dataset.name, len(train_loader),
 				batch_time_val=batch_time.val[0], batch_time_avg=batch_time.avg[0],
 				loss_val=losses.val[0], loss_avg=losses.avg[0])
 
@@ -329,19 +375,20 @@ def train(train_loader, model, criterion, optimizer, epoch, sigma):
 
 
 #
-def validate(val_loaders, model, criterion, epoch):
+def validate(val_loaders, model, criterion, pos=(0,0,0,0)):
 	global prec, output, target, sal
 	batch_time = AverageMeter()
 	losses = [AverageMeter() for _ in range(len(val_loaders))]
 	prec = [AverageMeter() for _ in range(len(val_loaders))]
 
+	train_policy, eval_policy, sigma, epoch = pos
 
 	# switch to evaluate mode
 	model.eval()
 	end = time.time()
 
 	with torch.no_grad():
-		logging.info('Validation - Epoch : {0}'.format(epoch))
+		# logging.info('Validation - Epoch : {0}'.format(weight_idx * 5))
 		logging.info('##############################################')
 		for val_idx, val_loader in enumerate(val_loaders):
 			# shuf_map = val_loader.dataset.d.get('fixation').sum(axis=0)
@@ -379,7 +426,7 @@ def validate(val_loaders, model, criterion, epoch):
 				# measure accuracy and record loss
 				acc_1  = accuracy(output, sal.cpu().numpy(),
 					fix.cpu().numpy(), CONFIG['eval']['metrics'], shuf_map,
-					(1, epoch, val_idx, batch_idx))
+					pos +  (val_idx, batch_idx))
 				# acc_2  = accuracy(fov.data.cpu().numpy(), mask.cpu().numpy())
 
 				losses[val_idx].update(loss.item(), input.size(0))
@@ -407,9 +454,9 @@ def validate(val_loaders, model, criterion, epoch):
 	return prec[0].avg[0]
 
 
-def save_checkpoint(state, is_best, sigma, filename='{0}-{1}-{2}.pth.tar'):
+def save_checkpoint(state, is_best, filename='{0}-{1}.pth.tar'):
 	date = datetime.now().strftime('_%y-%d-%m_%H-%M')
-	filename = filename.format(args.name, state['epoch'], sigma)
+	filename = filename.format(args.name, state['epoch'])
 	filename = os.path.join(args.weights, filename)
 	torch.save(state, filename)
 	if is_best:
@@ -422,7 +469,7 @@ def save_checkpoint(state, is_best, sigma, filename='{0}-{1}-{2}.pth.tar'):
 	#counter = 0
 	#if result_files:
 	#	counter = result_files[-1] + 1
-	with open('results/{0}-{1}.npy'.format(args.name, sigma), 'wb') as f:
+	with open('results/{0}.npy'.format(args.name), 'wb') as f:
 		np.save(f, np.array(RESULTS))
 
 
@@ -454,15 +501,15 @@ def adjust_learning_rate(optimizer, epoch):
 		param_group['lr'] = lr
 
 
-def accuracy(output, sal, fix, metrics=[AUC], shuf_map=None, loc=(0,0,0,0)):
+def accuracy(output, sal, fix, metrics=[AUC], shuf_map=None, pos=(0,0,0,0,0,0)):
 	"""Computes the precision@k for the specified values of k"""
 	batch_size = sal.shape[0]
 	result = list()
-	train, epoch, dataset_idx, batch_idx = loc
+	train_policy, eval_policy, sigma, epoch, dataset_idx, batch_idx = pos
 
 
 	for i in range(batch_size):
-		img_idx = batch_idx * batch_size + i
+		img_idx = (batch_idx * batch_size) + i
 		tmp = list()
 		for metric_idx, metric in enumerate(metrics):
 			if metric in [AUC, NSS]:
@@ -472,7 +519,8 @@ def accuracy(output, sal, fix, metrics=[AUC], shuf_map=None, loc=(0,0,0,0)):
 						fixation_map=fix[i], shuf_map=shuf_map))
 			elif metric in [CC, KLdiv]:
 				tmp.append(metric(output[i][0], sal[i][0]))
-			RESULTS[train, epoch, dataset_idx, img_idx, metric_idx] = tmp[-1]
+			RESULTS[train_policy, eval_policy, sigma, epoch, dataset_idx,
+					img_idx, metric_idx] = tmp[-1]
 		result.append(np.array(tmp))
 
 	return np.array(result)
@@ -500,6 +548,14 @@ def visualize(loader, model):
 
 			out_path = os.path.join(args.visualize, '{0}-{1}.jpg'.format(batch_idx, idx))
 			out.save(out_path)
+
+
+def load_check_point(model, weight):
+	w = torch.load(weight)
+	model.load_state_dict(w['state_dict'])
+	logging.info('{0} loaded'.format(weight))
+
+	return model
 
 
 
