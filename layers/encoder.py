@@ -5,6 +5,7 @@ import torch.utils.model_zoo as model_zoo
 from torchvision.models import vgg19
 import math
 import torch
+import torch.nn.functional as F
 
 
 
@@ -55,6 +56,7 @@ class Encoder(nn.Module):
 		self.classifier = nn.Conv2d(512,1, kernel_size=1)
 		# self.classifier_fov = nn.Conv2d(512,1, kernel_size=1)
 		self.sigmoid = nn.Sigmoid()
+		self.softmax = F.log_softmax
 
 	def forward(self, x, layers=range(5)):
 
@@ -70,9 +72,10 @@ class Encoder(nn.Module):
 
 		# return [feat, self.sigmoid(sal)]#, self.sigmoid(fov)]
 		# return [feat, feat]
-		#b, c, w, h = sal.size()
+		b, c, w, h = sal.size()
 		#return self.sigmoid(sal.view(b,-1)).view(b,c,w,h)
 
+		return self.softmax(sal.view(b,-1)).view(b,c,w,h)
 		return self.sigmoid(sal)
 		#return sal
 

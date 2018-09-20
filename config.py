@@ -18,7 +18,8 @@ CONFIG = {
 
 		'dataset' : ['KTH', 'CROWD', 'TORONTO', 'CAT2000'],
 		# 'dataset' : ['CAT2000'],
-		'metrics': [AUC, SAUC, NSS, CC, KLdiv],
+		#'metrics': [AUC, SAUC, NSS, CC, KLdiv],
+		'metrics' : ['KLdiv'],
 		},
 
 	'weights_path' : '/media/ramin/data/duration/weights/',

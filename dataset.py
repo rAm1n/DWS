@@ -10,6 +10,7 @@ import random
 
 import torch
 from torch.utils.data import Dataset, DataLoader
+import torch.nn as nn
 from torchvision import transforms, utils
 
 import numpy as np
@@ -345,31 +346,48 @@ class Saliency(Dataset):
 		# bluring input
 		img = Image.open(img).convert('RGB').resize((800, 600))
 		if self.duration:
+			ht = self.d.get('fixation_dw', index=[fix], modify='remove', size=(75,100))[0]
 			sal = self.d.get('fixation_dw', index=[fix], modify='remove')[0]
-			sal = g(sal, sigma=self.sigma)
-			sal = sal / sal.max()
-			sal *= 255
-			sal = Image.fromarray(sal.astype(np.uint8))#.resize((800,600))
 		else:
-			# sal = Image.open(sal)#.resize((800,600))
+			ht = self.d.get('fixation', index=[fix], modify='remove', size=(75,100))[0]
 			sal = self.d.get('fixation', index=[fix], modify='remove')[0]
-			sal = g(sal, sigma=self.sigma)
-			sal = sal / sal.max()
-			sal *= 255
-			sal = Image.fromarray(sal.astype(np.uint8))#.resize((800,600))
+
+		sal = g(sal, sigma=self.sigma)
+		sal = (sal - sal.min()) / (sal.max() - sal.min())
+		sal = sal.astype(np.float32)
+		sal = torch.from_numpy(sal)
+
+		ht = g(ht, sigma=self.sigma)
+		ht = (ht - ht.min()) / (ht.max() - ht.min())
+		ht = ht.astype(np.float32)
+		ht = torch.from_numpy(ht).reshape(1, -1)
+		ht = nn.Softmax()(ht).reshape( 1, 75, 100)
+			#sal = sal / sal.max()
+			#sal *= 255
+			#sal = Image.fromarray(sal.astype(np.uint8))#.resize((800,600))
+			#sal = sal / sal.sum()
+		#else:
+			# sal = Image.open(sal)#.resize((800,600))
+			#sal = self.d.get('fixation', index=[fix], modify='remove')[0]
+			#sal = g(sal, sigma=self.sigma)
+			#sal = sal / sal.max()
+			#sal *= 255
+			#sal = Image.fromarray(sal.astype(np.uint8))#.resize((800,600))
+			#sal = sal / sal.sum()
 
 		# fix = self.d.get('fixation', size=(600,800), index=[fix])[0]
 		fix = self.d.get('fixation', index=[fix], modify='remove')[0]
 
 		if self.transform:
 			img = self.transform(img)
-		if self.target_transform:
-			target = self.target_transform(sal)
-		if self.ht_transform:
-			sal = self.ht_transform(sal)
+		#if self.target_transform:
+		#	target = self.target_transform(sal)
+		#if self.ht_transform:
+		#	sal = self.ht_transform(sal)
 			# mask = self.sal_transform(gt)
 
-		return [img, target, sal, fix]
+		return [img, ht, sal, fix]
+		#return [img, target, sal, fix]
 		# return [img, sal, mask]
 
 

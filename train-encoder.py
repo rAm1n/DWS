@@ -137,7 +137,8 @@ def main():
 
 		# define loss function (criterion) and optimizer
 		#criterion = nn.BCEWithLogitsLoss().cuda()
-		criterion = nn.BCELoss().cuda()
+		#criterion = nn.BCELoss().cuda()
+		criterion = nn.KLDivLoss()
 
 		# optimizer = torch.optim.SGD(
 		# 				list(model.encoder[1].parameters()) +
@@ -276,11 +277,9 @@ def train(train_loader, model, criterion, optimizer, epoch, sigma):
 		# compute output
 		# features, output, fov = model(input_var)
 		output = model(input)
-
 		loss = criterion(output, target)
 		# loss_2 = criterion(fov, mask_var)
 		# loss = loss_1 + 0.3 * loss_2
-
 
 		b_h, b_w = train_loader.dataset.d.data[0]['img_size']
 		# output = torch.sigmoid(output)
@@ -295,7 +294,6 @@ def train(train_loader, model, criterion, optimizer, epoch, sigma):
 			fix.cpu().numpy(), CONFIG['train']['metrics'], shuf_map,
 			(0, epoch, 0, batch_idx))
 		# acc_2  = accuracy(fov.data.cpu().numpy(), mask.cpu().numpy())
-
 		losses.update(loss.item(), input.size(0))
 		prec[0].update(acc_1.mean(axis=0), input.size(0))
 		# top1_fov.update(acc_2.mean(), input.size(0))
@@ -407,7 +405,7 @@ def validate(val_loaders, model, criterion, epoch):
 	return prec[0].avg[0]
 
 
-def save_checkpoint(state, is_best, sigma, filename='{0}-{1}-{2}.pth.tar'):
+def save_checkpoint(state, is_best, sigma, filename='kld-{0}-{1}-{2}.pth.tar'):
 	date = datetime.now().strftime('_%y-%d-%m_%H-%M')
 	filename = filename.format(args.name, state['epoch'], sigma)
 	filename = os.path.join(args.weights, filename)
@@ -422,7 +420,7 @@ def save_checkpoint(state, is_best, sigma, filename='{0}-{1}-{2}.pth.tar'):
 	#counter = 0
 	#if result_files:
 	#	counter = result_files[-1] + 1
-	with open('results/{0}-{1}.npy'.format(args.name, sigma), 'wb') as f:
+	with open('results/kld-{0}-{1}.npy'.format(args.name, sigma), 'wb') as f:
 		np.save(f, np.array(RESULTS))
 
 
@@ -460,18 +458,22 @@ def accuracy(output, sal, fix, metrics=[AUC], shuf_map=None, loc=(0,0,0,0)):
 	result = list()
 	train, epoch, dataset_idx, batch_idx = loc
 
-
 	for i in range(batch_size):
 		img_idx = batch_idx * batch_size + i
 		tmp = list()
 		for metric_idx, metric in enumerate(metrics):
-			if metric in [AUC, NSS]:
-				tmp.append(metric(saliency_map=output[i][0], fixation_map=fix[i]))
-			elif metric == SAUC:
-				tmp.append(metric(saliency_map=output[i][0],
-						fixation_map=fix[i], shuf_map=shuf_map))
-			elif metric in [CC, KLdiv]:
-				tmp.append(metric(output[i][0], sal[i][0]))
+			try:
+				o = output[i][0]
+				o = o / o.max()
+				if metric in [AUC, NSS]:
+					tmp.append(metric(saliency_map=o, fixation_map=fix[i]))
+				elif metric == SAUC:
+					tmp.append(metric(saliency_map=o,
+							fixation_map=fix[i], shuf_map=shuf_map))
+				elif metric in [CC, KLdiv]:
+					tmp.append(metric(output[i][0], sal[i]))
+			except Exception as x:
+				print(x)
 			RESULTS[train, epoch, dataset_idx, img_idx, metric_idx] = tmp[-1]
 		result.append(np.array(tmp))
 
